@@ -1,0 +1,49 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>netstandard2.0</TargetFramework>
+		<TargetFrameworks>netstandard2.0;net461;net6</TargetFrameworks>
+		<ImplicitUsings>disable</ImplicitUsings>
+		<GenerateDocumentationFile>True</GenerateDocumentationFile>
+		<GeneratePackageOnBuild>False</GeneratePackageOnBuild>
+		<PackageIcon>cube.png</PackageIcon>
+		<PackageTags>Cube.Timer; HashedWheelTimer; Aproximated Timer</PackageTags>
+		<Title>Cube.Timer</Title>
+		<Description>A Timer optimized for approximated I/O timeout scheduling.</Description>
+		<Authors>Scythemen</Authors>
+		<Copyright>Apache License 2.0</Copyright>
+		<PackageProjectUrl>https://github.com/Scythemen/hashed-wheel-timer</PackageProjectUrl>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<RepositoryUrl>https://github.com/Scythemen/hashed-wheel-timer</RepositoryUrl>
+		<RepositoryType>git</RepositoryType>
+		<PackageReleaseNotes>Release 1.0.0</PackageReleaseNotes>
+		<PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+		<PackageRequireLicenseAcceptance>True</PackageRequireLicenseAcceptance>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('$(TargetFramework)', '^net\d'))">
+		<DefineConstants>NETFRAMEWORK</DefineConstants>
+	</PropertyGroup>
+	<PropertyGroup Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('$(TargetFramework)', '^netstandard\d'))">
+		<DefineConstants>NETSTANDARD</DefineConstants>
+	</PropertyGroup>
+	<PropertyGroup Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('$(TargetFramework)', '^netcoreapp\d'))">
+		<DefineConstants>NETCOREAPP</DefineConstants>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="3.1.32" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Include="..\..\nuget jpg\cube.png">
+			<Pack>True</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+		<None Include="..\README.md">
+		  <Pack>True</Pack>
+		  <PackagePath>\</PackagePath>
+		</None>
+	</ItemGroup>
+
+</Project>
