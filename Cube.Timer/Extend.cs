@@ -23,7 +23,6 @@ namespace Cube.Timer
             }
         }
 
-
         public static async Task<TResult> TimeoutAfter<TResult>(this Task<TResult> task, TimeSpan timeout)
         {
             using (var timeoutCancellationTokenSource = new CancellationTokenSource())

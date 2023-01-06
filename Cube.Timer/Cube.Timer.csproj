@@ -16,9 +16,13 @@
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 		<RepositoryUrl>https://github.com/Scythemen/hashed-wheel-timer</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
-		<PackageReleaseNotes>Release 1.0.0</PackageReleaseNotes>
+		<PackageReleaseNotes>1. Optimized &amp; clean the codes.
+2. Replace doubly-linked-list with singly-linked-list to reduce memory used.
+3. Use ArrayPool to Prevent GC.
+4. Testing passed of ~4,000,000 timer tasks, I think it's good enough for general scenarios.</PackageReleaseNotes>
 		<PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
 		<PackageRequireLicenseAcceptance>True</PackageRequireLicenseAcceptance>
+		<Version>1.0.1</Version>
 	</PropertyGroup>
 
 	<PropertyGroup Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('$(TargetFramework)', '^net\d'))">
@@ -33,6 +37,7 @@
 
 	<ItemGroup>
 		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="3.1.32" />
+		<PackageReference Include="System.Memory" Version="4.5.5" Condition=" '$(TargetFramework)' != 'net5.0' And  '$(TargetFramework)' != 'net6.0' " />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -41,8 +46,8 @@
 			<PackagePath>\</PackagePath>
 		</None>
 		<None Include="..\README.md">
-		  <Pack>True</Pack>
-		  <PackagePath>\</PackagePath>
+			<Pack>True</Pack>
+			<PackagePath>\</PackagePath>
 		</None>
 	</ItemGroup>
 

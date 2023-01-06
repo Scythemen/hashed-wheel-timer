@@ -5,9 +5,9 @@ namespace Cube.Timer
 {
     internal sealed class LambdaTimerTask : ITimerTask
     {
-        private readonly Action action0;
-        private readonly Action<object> action1;
-        private readonly object args;
+        private readonly Action action0 = null;
+        private readonly Action<object> action1 = null;
+        private readonly object args = null;
 
         public LambdaTimerTask(Action action)
         {
@@ -20,13 +20,13 @@ namespace Cube.Timer
             this.args = args;
         }
 
-
         public Task RunAsync()
         {
             action0?.Invoke();
             action1?.Invoke(this.args);
             return Task.CompletedTask;
         }
+
     }
 
 }

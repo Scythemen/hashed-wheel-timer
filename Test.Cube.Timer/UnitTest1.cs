@@ -1,6 +1,7 @@
 using Cube.Timer;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Buffers;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 
@@ -90,11 +91,11 @@ namespace Test.Cube.Timer
                 // if MyTimerTask has been cancelled
             }
 
-            // reuse the timerTask
+            // reuse the timerTask and specify the delayMilliseconds=2000
             timer.AddTask(2000, handle2.TimerTask);
 
             // stop the timer, and get the unprocessed tasks.
-            var unprocessedTasks = timer.Stop().Result;
+            var unprocessedTasks = timer.Stop(true).Result;
 
             Assert.IsTrue(unprocessedTasks.Count() == 3);
 
@@ -224,8 +225,10 @@ namespace Test.Cube.Timer
                     //    var result = await timer.Stop();
                     //    Debug.WriteLine($"stop-----{result?.Count()}");
                     //}
-
                 }
+
+                await timer.Stop(true);
+
             });
 
             t.Wait();
@@ -234,6 +237,45 @@ namespace Test.Cube.Timer
 
 
         }
+
+        [Test]
+        public void TestExecuteException()
+        {
+            var loggerFactory = LoggerFactory.Create((builder) =>
+            {
+                builder.SetMinimumLevel(LogLevel.Trace);
+                builder.AddConsole();
+                builder.AddDebug();
+            });
+            var logger = loggerFactory.CreateLogger<HashedWheelTimer>();
+
+            var timer = new HashedWheelTimer(logger);
+
+            timer.AddTask(1000, () =>
+            {
+                Debug.WriteLine($" before do work. ");
+                // devide by zero
+                int a = 9;
+                int b = 8;
+                int c = a / (b - 8);
+                Debug.WriteLine($"  {a} ");
+            });
+
+            timer.AddTask(3000, () =>
+                       {
+                           Debug.WriteLine($" do work. ");
+                       });
+
+
+            while (timer.PendingTasks > 0)
+            {
+                Thread.Sleep(600);
+            }
+
+
+        }
+
+ 
 
     }
 }

@@ -7,10 +7,7 @@ namespace Cube.Timer
     /// </summary>
     public sealed class TimerTaskHandle
     {
-        private static readonly int STATUS_INIT = 0;
-        private static readonly int STATUS_CANCELLED = 1;
-
-        private int _status;
+        private bool _cancelled = false;
         private readonly long _expireAt;
         private readonly ITimerTask _timerTask;
 
@@ -27,7 +24,7 @@ namespace Cube.Timer
         /// <summary>
         ///   Gets a value that indicates whether the task has been cancelled.
         /// </summary>
-        public bool Cancelled => _status == STATUS_CANCELLED;
+        public bool Cancelled => _cancelled;
 
         /// <summary>
         /// the handle of timer task 
@@ -38,7 +35,6 @@ namespace Cube.Timer
         {
             _timerTask = timerTask;
             _expireAt = expireAt;
-            _status = STATUS_INIT;
         }
 
         /// <summary>
@@ -46,7 +42,7 @@ namespace Cube.Timer
         /// </summary>
         public void Cancel()
         {
-            _status = STATUS_CANCELLED;
+            _cancelled = true;
         }
 
     }

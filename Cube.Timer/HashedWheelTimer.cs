@@ -1,9 +1,9 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using System;
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -14,21 +14,38 @@ namespace Cube.Timer
     /// </summary>
     public class HashedWheelTimer : IDisposable
     {
+        //
+        // 1. Running a single thread as the worker-thread in background to spin the wheel.
+        //   We don't use Task.Run() to get the thread which in the threadPool,
+        //   because the jobs-queue of threadPool could be filled by many jobs just in case.
+        //   After a Task.Delay() to wait to next tick, the thread may not back to work on time.
+        //   So *LongRunning* is necessary, to create a new thread.
+        //
+        // 2. Call the method timerTaskHandle.Cancel() to cancel the task,
+        //    and we don't delete it from the taskList imimmediately, but just marked it's cancelled. 
+        //   When the task is expired and to be executing, then check the status of  *Cancelled*.
+        //   This gonna needs more memory, but saves CPU times for searching and delete the task.
+        //  expecially the timer is handling a large number of tasks.
+        //
+
         private readonly ILogger logger;
 
         private static readonly int MAX_WHEEL_CAPACITY = 1 << 30;
 
-        private readonly Bucket[] wheel;
+        private readonly TaskList[] wheel;
         private readonly int mask;
         private readonly long MAX_PENDING_TIMER_TASKS;
 
         private readonly long tickDuration;
-        private readonly long baseTime = DateTime.UtcNow.Ticks; //  1 ns = 10 ticks
+        private readonly long baseTime = DateTime.UtcNow.Ticks; //  1ms = 10000 ticks
         private long tick = 0;
 
+        private bool gatherUnprocessedTasks = false;
         private long pendingTasks = 0;
         private readonly Task workerThreadTask;
         private readonly CancellationTokenSource cancellationTokenSource = new CancellationTokenSource();
+
+
 
         /// <summary>
         ///   Gets a value that indicates the total of pending tasks.
@@ -117,30 +134,25 @@ namespace Cube.Timer
 
             this.logger.LogDebug("Initialized, {0}", this);
 
-            // Running a single thread as the worker-thread in background to spin the wheel.
-            // We don't use Task.Run() to get the thread which in the threadPool,
-            // because the jobs-queue of threadPool could be filled by many jobs.
-            // After a Task.Delay() to wait to next tick, the thread may not back to work on time.
-            // So *LongRunning* is necessary, to create a new thread.
             workerThreadTask = Task.Factory.StartNew(SpinTheWheel, cancellationTokenSource.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
 
         }
 
 
-        private static Bucket[] CreateWheel(int ticksPerWheel)
+        private static TaskList[] CreateWheel(int ticksPerWheel)
         {
             ticksPerWheel = NormalizeTicksPerWheel(ticksPerWheel);
-            var wheel = new Bucket[ticksPerWheel];
+            var wheel = new TaskList[ticksPerWheel];
             for (var i = 0; i < wheel.Length; i++)
             {
-                wheel[i] = new Bucket();
+                wheel[i] = new TaskList();
             }
 
             return wheel;
         }
 
 
-        private readonly ConcurrentQueue<BucketNode> newTaskQueue = new ConcurrentQueue<BucketNode>();
+        private readonly ConcurrentQueue<TaskEntry> newTaskQueue = new ConcurrentQueue<TaskEntry>();
 
         /// <summary>
         /// Add a timer task for one-time execution.
@@ -180,9 +192,9 @@ namespace Cube.Timer
             var rounds = (calculated - tick) / wheel.Length;
 
             var ticks = Math.Max(calculated, tick); // Ensure we don't schedule for past.
-            var bucketIndex = (int)(ticks & mask);
+            var slotIndex = (int)(ticks & mask);
 
-            var node = new BucketNode(handle, deadline, rounds, bucketIndex);
+            var node = new TaskEntry(handle, deadline, rounds, slotIndex);
 
             logger.LogTrace("Add new task to queue, {0}", node);
 
@@ -255,52 +267,60 @@ namespace Cube.Timer
         /// <summary>
         /// stop the timer
         /// </summary>
-        /// <returns>return all the unprocessed tasks</returns>
-        public async Task<IEnumerable<TimerTaskHandle>> Stop()
+        /// <param name="gatherUnprocessedTasks">gather upprocessed tasks</param>
+        /// <returns>return empty list if gatherUnprocessedTasks = false, otherwise return all the unprocessed tasks. </returns>
+        public async Task<IList<TimerTaskHandle>> Stop(bool gatherUnprocessedTasks = false)
         {
-            logger.LogTrace($"Stoping {nameof(HashedWheelTimer)} ...");
+            logger.LogTrace($"Stoping {nameof(HashedWheelTimer)} ... gatherUnprocessedTasks={gatherUnprocessedTasks}");
 
-            if (cancellationTokenSource == null || cancellationTokenSource.Token.IsCancellationRequested)
+            lock (newTaskQueue)
             {
-                return Enumerable.Empty<TimerTaskHandle>();
-            }
-
-            try
-            {
-                cancellationTokenSource.Cancel();
-
-                if (workerThreadTask != null && !workerThreadTask.IsCompleted)
+                if (cancellationTokenSource == null || cancellationTokenSource.Token.IsCancellationRequested)
                 {
-                    logger.LogTrace("Waiting for the worker thread...");
-                    // waiting for dumping all the unprocessed tasks 
-
-                    //NETCOREAPP3_1 || NET5_0 || NETSTANDARD2_1 || NETSTANDARD2_0
-#if (NETSTANDARD || NETFRAMEWORK || NETCOREAPP || NET5_0)
-                    await workerThreadTask.TimeoutAfter(TimeSpan.FromSeconds(5));
-#else // (NET6_0 || NET7_0)
-                    await workerThreadTask.WaitAsync(TimeSpan.FromSeconds(5)); // from .net 6
-#endif
-
+                    return new List<TimerTaskHandle>();
+                }
+                else
+                {
+                    cancellationTokenSource.Cancel();
                 }
             }
-            catch (Exception ex)
+
+            this.gatherUnprocessedTasks = gatherUnprocessedTasks;
+
+            if (this.gatherUnprocessedTasks)
             {
-                logger.LogDebug(ex, "stop and dumping unprocessed tasks timeout");
+                try
+                {
+                    if (workerThreadTask != null && !workerThreadTask.IsCompleted)
+                    {
+                        logger.LogTrace("Waiting for the worker thread...");
+
+#if (NET6_0 || NET7_0)
+                        await workerThreadTask.WaitAsync(TimeSpan.FromSeconds(5));  
+#else
+                        await workerThreadTask.TimeoutAfter(TimeSpan.FromSeconds(5));
+#endif
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.LogDebug(ex, "stop timer");
+                }
             }
 
             logger.LogDebug($"Stoping {nameof(HashedWheelTimer)} ... done");
 
-            return unprocessedTaskQueue;
-
+            return unprocessedTasks;
         }
 
 
-        private Queue<TimerTaskHandle> unprocessedTaskQueue = new Queue<TimerTaskHandle>();
+        private readonly List<TimerTaskHandle> unprocessedTasks = new List<TimerTaskHandle>();
 
         private void SpinTheWheel()
         {
             this.logger.LogTrace("Start spinning the wheel...   ManagedThreadId={0}", Thread.CurrentThread.ManagedThreadId);
 
+            Exception unhandleException = null;
             CancellationToken token = cancellationTokenSource.Token;
             try
             {
@@ -312,33 +332,32 @@ namespace Cube.Timer
                             tick, DateTime.Now.ToString("HH:mm:ss.fff"), Thread.CurrentThread.ManagedThreadId, Thread.CurrentThread.IsThreadPoolThread);
                     }
 
-                    // firstly transfer new task from queue to buckets
-                    var count = TransferNewTaskToBuckets(token);
-                    logger.LogTrace("{0} >>> Transfer new tasks from queue to buckets, count = {1}", tick, count);
+                    TransferNewTaskToWheel(token);
 
-                    // remove the expired nodes from bucket to unprocess task queue
+                    // remove the expired tasks
                     var idx = (int)(tick & mask);
-                    count = wheel[idx].RemoveExpiredNodes(ref unprocessedTaskQueue);
+                    (var expiredTotal, var expiredTasks) = wheel[idx].RemoveExpiredTasks();
 
-                    this.logger.LogTrace("{0} >>> remove the expired nodes from bucket, count = {1}", tick, count);
+                    this.logger.LogTrace("{0} >>> remove the expired tasks, count = {1}", tick, expiredTasks.Length);
 
-                    // process task
-                    while (!token.IsCancellationRequested && unprocessedTaskQueue.Count > 0) // count of queue is O(1).
+                    // process expired tasks
+                    Interlocked.Add(ref pendingTasks, -expiredTotal);
+                    for (int i = 0; i < expiredTotal; i++)
                     {
-                        //   if (!unprocessedTaskQueue.TryDequeue(out TimerTaskHandle handle)) // from .net 6.0
-                        TimerTaskHandle handle = unprocessedTaskQueue.Dequeue();
-                        if (handle == null)
+                        if (!expiredTasks[i].TimerTaskHandle.Cancelled)
                         {
-                            break;
+                            _ = expiredTasks[i].TimerTask.RunAsync();
                         }
 
-                        Interlocked.Decrement(ref pendingTasks);
-
-                        if (!handle.Cancelled)
+                        // transfer the rest
+                        if (token.IsCancellationRequested && gatherUnprocessedTasks)
                         {
-                            _ = handle.TimerTask.RunAsync();
+                            unprocessedTasks.Add(expiredTasks[i].TimerTaskHandle);
                         }
                     }
+
+                    // free the array, very important.
+                    ArrayPool<TaskEntry>.Shared.Return(expiredTasks);
 
                     // wait to next tick
                     var deadline = baseTime + tickDuration + tick * tickDuration - 1;
@@ -362,56 +381,85 @@ namespace Cube.Timer
                 //  Task was canceled while running.
                 logger.LogDebug(ex2.Message);
             }
-
-            logger.LogTrace("Exit loop, dumping unprocessed tasks... ");
-
-            for (int i = (int)(tick & mask); i < wheel.Length; i++)
+            catch (Exception ex)
             {
-                wheel[i].RemoveAllNodes(ref unprocessedTaskQueue);
+                unhandleException = ex;
+                cancellationTokenSource.Cancel();
+
+                logger.LogError(ex, "Check the execution of the timer task.");
             }
 
-            while (true)
+            if (gatherUnprocessedTasks)
             {
-                if (!newTaskQueue.TryDequeue(out BucketNode node))
-                {
-                    break;
-                }
-                unprocessedTaskQueue.Enqueue(node.TimerTaskHandle);
+                GatheringUnprocessedTasks();
             }
 
             Interlocked.Exchange(ref pendingTasks, 0);
 
+            logger.LogDebug("Worker thread exit, the wheel stops spinning.");
+
+            if (unhandleException != null)
+            {
+                throw unhandleException;
+            }
+
         }
 
-        private int TransferNewTaskToBuckets(CancellationToken cancellationToken)
+        private void GatheringUnprocessedTasks()
+        {
+            logger.LogTrace("Gathering unprocessed tasks... ");
+
+            for (int i = (int)(tick & mask); i < wheel.Length; i++)
+            {
+                (var total, var list) = wheel[i].RemoveAllTasks();
+                for (int k = 0; k < total; k++)
+                {
+                    unprocessedTasks.Add(list[k]);
+                }
+                ArrayPool<TimerTaskHandle>.Shared.Return(list);
+            }
+
+            while (true)
+            {
+                if (!newTaskQueue.TryDequeue(out TaskEntry node))
+                {
+                    break;
+                }
+                unprocessedTasks.Add(node.TimerTaskHandle);
+            }
+        }
+
+        private int TransferNewTaskToWheel(CancellationToken cancellationToken)
         {
             int count = 0;
 
             // to prevent the worker thread stuck in adding new task loop.
             for (var i = 0; i < 60_000; i++)
             {
-                if (!newTaskQueue.TryDequeue(out var node) || cancellationToken.IsCancellationRequested)
+                if (!newTaskQueue.TryDequeue(out var entry) || cancellationToken.IsCancellationRequested)
                 {
                     break;
                 }
 
-                if (node.TimerTaskHandle.Cancelled)
+                if (entry.TimerTaskHandle.Cancelled)
                 {
-                    logger.LogTrace(">>> task was cancelled: {0}", node);
+                    logger.LogTrace("{0} >>> task was cancelled: {0}", tick, entry);
                     Interlocked.Decrement(ref pendingTasks);
                     continue;
                 }
 
-                var bucket = wheel[node.BucketIndex];
-                bucket.AddNode(node);
+                wheel[entry.WheelIndex].AddTask(entry);
+
                 count++;
             }
+
+            logger.LogTrace("{0} >>> Transfer new tasks, count = {1}", tick, count);
 
             return count;
         }
 
 
-        // get max power of 2
+        // get upper power of 2
         private static int NormalizeTicksPerWheel(int ticksPerWheel)
         {
             if (ticksPerWheel >= MAX_WHEEL_CAPACITY)
@@ -437,7 +485,11 @@ namespace Cube.Timer
         public void Dispose()
         {
             cancellationTokenSource?.Cancel();
-            cancellationTokenSource?.Dispose();
+            for (int i = 0; i < wheel.Length; i++)
+            {
+                wheel[i].Dispose();
+                wheel[i] = null;
+            }
         }
 
         public override string ToString()

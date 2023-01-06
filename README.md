@@ -1,11 +1,19 @@
 # hashed-wheel-timer
-A .NET implementation of Timer, which optimized for approximated I/O timeout scheduling, also called Approximated Timer.
+A .NET implementation of Timer, which optimized for approximated I/O timeout scheduling, also called Approximated Timer. Inspired by Netty [HashedWheelTimer](https://github.com/netty/netty/blob/4.1/common/src/main/java/io/netty/util/HashedWheelTimer.java).
 
-Inspired by Netty [HashedWheelTimer](https://github.com/netty/netty/blob/4.1/common/src/main/java/io/netty/util/HashedWheelTimer.java)
+.NET implemented & Optimized & Notes: 
+- Replace doubly-linked-list with singly-linked-list to reduce memory used.
+- Use ArrayPool to Prevent GC.
+- Optimized for small task that will be executed after a short delay. 
+    If it takes a long time to complete the task, consider to start a new thread. 
+- `tickDuration`: the smaller value you set, the higher level of precision you get.
+    but it will keep the timer busy for ticking. Adjust the `tickDuration` & `ticksPerWheel` in your case.
+- Testing passed of ~4,000,000 timer tasks, I think it's good enough for general scenarios.
+
 
 # Install
 
-NuGet package
+Download the source code, or NuGet package
 
 ```shell
 https://www.nuget.org/packages/Cube.Timer
