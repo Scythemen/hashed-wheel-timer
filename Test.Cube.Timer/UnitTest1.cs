@@ -52,6 +52,110 @@ namespace Test.Cube.Timer
 
         }
 
+        [Test]
+        public void AddNotice()
+        {
+            var loggerFactory = LoggerFactory.Create((builder) =>
+            {
+                builder.SetMinimumLevel(LogLevel.Trace);
+                builder.AddConsole();
+                builder.AddDebug();
+            });
+            var logger = loggerFactory.CreateLogger<HashedWheelTimer>();
+
+            var timer = new HashedWheelTimer(TimeSpan.FromSeconds(1),512,0, logger);
+            
+            timer.SetNoticeCallback((list) =>
+                {
+                    foreach (var obj in list)
+                    {
+                        if (obj==null)
+                        {
+                            break;
+                        }
+                         logger.LogDebug(" +++++ notice callback {}",obj);
+                    }
+                });
+
+
+                timer.AddNotice(1357, 1357);
+
+                timer.AddNotice(TimeSpan.FromMilliseconds(1234), 1234);
+
+                var t = Task.Run(async () =>
+                {
+                    await Task.Delay(1000);
+
+                    while (timer.IsRunning && timer.PendingTasks != 0)
+                    {
+                        logger.LogDebug($">> PendingTasks : {timer.PendingTasks} ");
+                        await Task.Delay(1000);
+                    }
+                });
+
+            t.Wait();
+
+        }
+        
+        [Test]
+        public void AddNotice2()
+        {
+            var loggerFactory = LoggerFactory.Create((builder) =>
+            {
+                builder.SetMinimumLevel(LogLevel.Trace);
+                builder.AddConsole();
+                builder.AddDebug();
+            });
+            var logger = loggerFactory.CreateLogger<HashedWheelTimer>();
+
+            Random random = new Random(DateTime.Now.Millisecond);
+            var source = new int[1024];
+            for (int i = 0; i < source.Length; i++)
+            {
+                source[i] = random.Next(DateTime.Now.Millisecond);
+            }
+            
+              var result = new List<int>( );
+                    
+            var timer = new HashedWheelTimer(TimeSpan.FromSeconds(1),512,0, logger);
+            
+            timer.SetNoticeCallback((notices) =>
+            {
+                foreach (var obj in notices)
+                {
+                    if (obj==null)
+                    {
+                        break;
+                    }
+                    result.Add(Convert.ToInt32(obj));
+                    logger.LogDebug(" +++++ notice callback {}",obj);
+                }
+            });
+
+            for (int i = 0; i < source.Length; i++)
+            {
+                timer.AddNotice(random.Next(1000, 10 * 1000),source[i]);
+            }
+          
+
+            var t = Task.Run(async () =>
+            {
+                await Task.Delay(1000);
+
+                while (timer.IsRunning && timer.PendingTasks != 0)
+                {
+                    logger.LogDebug($">> PendingTasks : {timer.PendingTasks} ");
+                    await Task.Delay(1000);
+                }
+            });
+
+            t.Wait();
+
+            Assert.IsTrue( source.Length==result.Count);
+
+            
+        }
+        
 
         [Test]
         public void TracingLogger()
@@ -149,19 +253,19 @@ namespace Test.Cube.Timer
             int workerThreads, completionPortThreads;
 
             ThreadPool.GetMaxThreads(out workerThreads, out completionPortThreads);
-            Debug.WriteLine("GetMaxThreads£º worker threads={0}, IO threads={1} ", workerThreads, completionPortThreads);
+            Debug.WriteLine("GetMaxThreadsÂ£Âº worker threads={0}, IO threads={1} ", workerThreads, completionPortThreads);
 
             ThreadPool.GetMinThreads(out workerThreads, out completionPortThreads);
-            Debug.WriteLine("GetMinThreads£º worker threads={0}, IO threads={1} ", workerThreads, completionPortThreads);
+            Debug.WriteLine("GetMinThreadsÂ£Âº worker threads={0}, IO threads={1} ", workerThreads, completionPortThreads);
 
             ThreadPool.GetAvailableThreads(out workerThreads, out completionPortThreads);
-            Debug.WriteLine("GetAvailableThreads£º worker threads={0}, IO threads={1} ", workerThreads, completionPortThreads);
+            Debug.WriteLine("GetAvailableThreadsÂ£Âº worker threads={0}, IO threads={1} ", workerThreads, completionPortThreads);
 
             //// -------
             //ThreadPool.SetMaxThreads(80, 512);
 
             //ThreadPool.GetAvailableThreads(out workerThreads, out completionPortThreads);
-            //     Debug.WriteLine("GetAvailableThreads£º worker threads={0}, IO threads={1} ", workerThreads, completionPortThreads);
+            //     Debug.WriteLine("GetAvailableThreadsÂ£Âº worker threads={0}, IO threads={1} ", workerThreads, completionPortThreads);
 
 
             var loggerFactory = LoggerFactory.Create((builder) =>

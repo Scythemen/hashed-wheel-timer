@@ -28,8 +28,8 @@ namespace Cube.Timer
 
         public override string ToString()
         {
-            return string.Format("[{0}: wheelIndex={1}, deadline={2}, remainingRounds={3}]",
-                nameof(TaskEntry), WheelIndex, Deadline, RemainingRounds);
+            return string.Format("[{0}: wheelIndex={1}, deadline={2}, remainingRounds={3}, isNotice={4}]",
+                nameof(TaskEntry), WheelIndex, Deadline, RemainingRounds, TimerTaskHandle.Notice != null);
         }
 
         public void Dispose()
@@ -38,6 +38,5 @@ namespace Cube.Timer
             TimerTask = null;
             TimerTaskHandle = null;
         }
-
     }
 }

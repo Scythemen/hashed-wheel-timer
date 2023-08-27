@@ -10,6 +10,12 @@ namespace Cube.Timer
         private bool _cancelled = false;
         private readonly long _expireAt;
         private readonly ITimerTask _timerTask;
+        private readonly object _notice;
+
+        /// <summary>
+        /// Get the notice which will be noticed in the future
+        /// </summary>
+        public object Notice => _notice;
 
         /// <summary>
         /// Get the timer task which will be executed in the future.
@@ -38,12 +44,22 @@ namespace Cube.Timer
         }
 
         /// <summary>
+        /// the handle of timer task 
+        /// </summary>
+        /// <param name="notice">the notice</param>
+        /// <param name="expireAt">the task will expire at the future </param>
+        public TimerTaskHandle(object notice, long expireAt)
+        {
+            _notice = notice;
+            _expireAt = expireAt;
+        }
+
+        /// <summary>
         /// Cancel the task
         /// </summary>
         public void Cancel()
         {
             _cancelled = true;
         }
-
     }
 }

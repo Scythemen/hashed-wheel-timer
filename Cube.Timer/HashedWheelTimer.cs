@@ -22,10 +22,10 @@ namespace Cube.Timer
         //   So *LongRunning* is necessary, to create a new thread.
         //
         // 2. Call the method timerTaskHandle.Cancel() to cancel the task,
-        //    and we don't delete it from the taskList imimmediately, but just marked it's cancelled. 
+        //    and we don't delete it from the taskList immediately, but just marked it's cancelled. 
         //   When the task is expired and to be executing, then check the status of  *Cancelled*.
         //   This gonna needs more memory, but saves CPU times for searching and delete the task.
-        //  expecially the timer is handling a large number of tasks.
+        //  especially the timer is handling a large number of tasks.
         //
 
         private readonly ILogger logger;
@@ -44,7 +44,6 @@ namespace Cube.Timer
         private long pendingTasks = 0;
         private readonly Task workerThreadTask;
         private readonly CancellationTokenSource cancellationTokenSource = new CancellationTokenSource();
-
 
 
         /// <summary>
@@ -101,14 +100,15 @@ namespace Cube.Timer
         /// <param name="logger">if necessary, set the logger, default value is null</param>
         /// <exception cref="ArgumentOutOfRangeException"></exception>
         public HashedWheelTimer(
-           TimeSpan tickDuration,
+            TimeSpan tickDuration,
             int ticksPerWheel = 512,
             long maxPendingTimerTasks = 0,
             ILogger<HashedWheelTimer> logger = null)
         {
             if (ticksPerWheel < 1 || ticksPerWheel > MAX_WHEEL_CAPACITY)
             {
-                throw new ArgumentOutOfRangeException(nameof(ticksPerWheel), $"expected: 0 <  value < {MAX_WHEEL_CAPACITY} ");
+                throw new ArgumentOutOfRangeException(nameof(ticksPerWheel),
+                    $"expected: 0 <  value < {MAX_WHEEL_CAPACITY} ");
             }
 
             if (logger == null)
@@ -125,17 +125,98 @@ namespace Cube.Timer
             wheel = CreateWheel(ticksPerWheel);
             mask = wheel.Length - 1;
 
-            if (tickDuration.TotalMilliseconds < 1 || tickDuration.TotalMilliseconds > (long.MaxValue / 10000 / wheel.Length))
+            if (tickDuration.TotalMilliseconds < 1 ||
+                tickDuration.TotalMilliseconds > (long.MaxValue / 10000 / wheel.Length))
             {
-                throw new ArgumentOutOfRangeException(nameof(tickDuration), $"expected milliseconds: 0 <  value < {long.MaxValue / 10000 / wheel.Length} ");
+                throw new ArgumentOutOfRangeException(nameof(tickDuration),
+                    $"expected milliseconds: 0 <  value < {long.MaxValue / 10000 / wheel.Length} ");
             }
 
             this.tickDuration = tickDuration.Ticks;
 
             this.logger.LogDebug("Initialized, {0}", this);
 
-            workerThreadTask = Task.Factory.StartNew(SpinTheWheel, cancellationTokenSource.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+            workerThreadTask = Task.Factory.StartNew(SpinTheWheel, cancellationTokenSource.Token,
+                TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        }
 
+
+        /// <summary>
+        /// The delegate to handle the notices.
+        /// </summary>
+        public delegate void NoticeCallback(IList<object> notices);
+
+        private NoticeCallback noticeCallback;
+
+        /// <summary>
+        /// Set the notice callback.
+        /// </summary>
+        /// <param name="callback"></param>
+        public void SetNoticeCallback(NoticeCallback callback)
+        {
+            noticeCallback = callback;
+        }
+
+        /// <summary>
+        /// Add a notice task for one-time execution.
+        /// </summary>
+        /// <param name="notice">the notice</param>
+        /// <param name="delayMilliseconds">delay milliseconds</param>
+        /// <returns>a handle which is associated with the specified timer task</returns>
+        public TimerTaskHandle AddNotice(int delayMilliseconds, object notice)
+        {
+            return AddNotice(TimeSpan.FromMilliseconds(delayMilliseconds), notice);
+        }
+
+        /// <summary>
+        /// Add a notice task for one-time execution.
+        /// </summary>
+        /// <param name="notice">the notice</param>
+        /// <param name="delay">delay time</param>
+        /// <returns>a handle which is associated with the specified timer task</returns>
+        public TimerTaskHandle AddNotice(TimeSpan delay, object notice)
+        {
+            if (notice == null)
+            {
+                throw new ArgumentNullException(nameof(notice));
+            }
+
+            if (cancellationTokenSource != default && cancellationTokenSource.Token.IsCancellationRequested)
+            {
+                throw new InvalidOperationException(
+                    $"failed to add notice, {nameof(HashedWheelTimer)} has been stopped");
+            }
+
+            Interlocked.Increment(ref pendingTasks);
+            if (MAX_PENDING_TIMER_TASKS > 0 && pendingTasks > MAX_PENDING_TIMER_TASKS)
+            {
+                Interlocked.Decrement(ref pendingTasks);
+                throw new InvalidOperationException(
+                    $"failed to add notice, approaching limit,  {nameof(MAX_PENDING_TIMER_TASKS)}={MAX_PENDING_TIMER_TASKS}.");
+            }
+
+            var deadline = DateTime.UtcNow.Ticks - baseTime + delay.Ticks;
+            if (deadline < 0 && delay.Ticks > 0)
+            {
+                // Guard against overflow.
+                deadline = long.MaxValue;
+            }
+
+            var handle = new TimerTaskHandle(notice, baseTime + deadline);
+
+            var calculated = deadline / tickDuration;
+            var rounds = (calculated - tick) / wheel.Length;
+
+            var ticks = Math.Max(calculated, tick); // Ensure we don't schedule for past.
+            var slotIndex = (int)(ticks & mask);
+
+            var node = new TaskEntry(handle, deadline, rounds, slotIndex);
+
+            logger.LogTrace("Add notice to queue, {0}", node);
+
+            newTaskQueue.Enqueue(node);
+
+            return handle;
         }
 
 
@@ -169,14 +250,16 @@ namespace Cube.Timer
 
             if (cancellationTokenSource != default && cancellationTokenSource.Token.IsCancellationRequested)
             {
-                throw new InvalidOperationException($"failed to add new task, {nameof(HashedWheelTimer)} has been stopped");
+                throw new InvalidOperationException(
+                    $"failed to add new task, {nameof(HashedWheelTimer)} has been stopped");
             }
 
             Interlocked.Increment(ref pendingTasks);
             if (MAX_PENDING_TIMER_TASKS > 0 && pendingTasks > MAX_PENDING_TIMER_TASKS)
             {
                 Interlocked.Decrement(ref pendingTasks);
-                throw new InvalidOperationException($"failed to add new task, approching limit,  {nameof(MAX_PENDING_TIMER_TASKS)}={MAX_PENDING_TIMER_TASKS}.");
+                throw new InvalidOperationException(
+                    $"failed to add new task, approching limit,  {nameof(MAX_PENDING_TIMER_TASKS)}={MAX_PENDING_TIMER_TASKS}.");
             }
 
             var deadline = DateTime.UtcNow.Ticks - baseTime + delay.Ticks;
@@ -296,7 +379,7 @@ namespace Cube.Timer
                         logger.LogTrace("Waiting for the worker thread...");
 
 #if (NET6_0 || NET7_0)
-                        await workerThreadTask.WaitAsync(TimeSpan.FromSeconds(5));  
+                        await workerThreadTask.WaitAsync(TimeSpan.FromSeconds(5));
 #else
                         await workerThreadTask.TimeoutAfter(TimeSpan.FromSeconds(5));
 #endif
@@ -318,35 +401,48 @@ namespace Cube.Timer
 
         private void SpinTheWheel()
         {
-            this.logger.LogTrace("Start spinning the wheel...   ManagedThreadId={0}", Thread.CurrentThread.ManagedThreadId);
+            this.logger.LogTrace("Start spinning the wheel...   ManagedThreadId={0}",
+                Thread.CurrentThread.ManagedThreadId);
 
             Exception unhandleException = null;
             CancellationToken token = cancellationTokenSource.Token;
             try
             {
+                IList<object> expiredNotices = new List<object>();
+
                 while (!token.IsCancellationRequested)
                 {
                     if (this.logger.IsEnabled(LogLevel.Trace))
                     {
-                        this.logger.LogTrace("{0} >>> ticking --------- {1} -- ManagedThreadId={2} -- IsThreadPoolThread={3}  ",
-                            tick, DateTime.Now.ToString("HH:mm:ss.fff"), Thread.CurrentThread.ManagedThreadId, Thread.CurrentThread.IsThreadPoolThread);
+                        this.logger.LogTrace(
+                            "{0} >>> ticking --------- {1} -- ManagedThreadId={2} -- IsThreadPoolThread={3}  ",
+                            tick, DateTime.Now.ToString("HH:mm:ss.fff"), Thread.CurrentThread.ManagedThreadId,
+                            Thread.CurrentThread.IsThreadPoolThread);
                     }
 
                     TransferNewTaskToWheel(token);
 
                     // remove the expired tasks
                     var idx = (int)(tick & mask);
-                    (var expiredTotal, var expiredTasks) = wheel[idx].RemoveExpiredTasks();
+                    (var expiredTotal, var expiredTasks, var totalNotices) = wheel[idx].RemoveExpiredTasks();
 
                     this.logger.LogTrace("{0} >>> remove the expired tasks, count = {1}", tick, expiredTasks.Length);
 
                     // process expired tasks
+                    expiredNotices.Clear();
                     Interlocked.Add(ref pendingTasks, -expiredTotal);
                     for (int i = 0; i < expiredTotal; i++)
                     {
                         if (!expiredTasks[i].TimerTaskHandle.Cancelled)
                         {
-                            _ = expiredTasks[i].TimerTask.RunAsync();
+                            if (expiredTasks[i].TimerTaskHandle.Notice != null)
+                            {
+                                expiredNotices.Add(expiredTasks[i].TimerTaskHandle.Notice);
+                            }
+                            else
+                            {
+                                _ = expiredTasks[i].TimerTask.RunAsync();
+                            }
                         }
 
                         // transfer the rest
@@ -354,6 +450,12 @@ namespace Cube.Timer
                         {
                             unprocessedTasks.Add(expiredTasks[i].TimerTaskHandle);
                         }
+                    }
+
+                    // handle the notices
+                    if (expiredNotices.Count > 0)
+                    {
+                        noticeCallback?.Invoke(expiredNotices);
                     }
 
                     // free the array, very important.
@@ -402,7 +504,6 @@ namespace Cube.Timer
             {
                 throw unhandleException;
             }
-
         }
 
         private void GatheringUnprocessedTasks()
@@ -416,6 +517,7 @@ namespace Cube.Timer
                 {
                     unprocessedTasks.Add(list[k]);
                 }
+
                 ArrayPool<TimerTaskHandle>.Shared.Return(list);
             }
 
@@ -425,6 +527,7 @@ namespace Cube.Timer
                 {
                     break;
                 }
+
                 unprocessedTasks.Add(node.TimerTaskHandle);
             }
         }
@@ -497,6 +600,5 @@ namespace Cube.Timer
             return string.Format("[{0}: tickDuration={1}, ticksPerWheel={2}, maxPendingTimerTasks={3}]",
                 nameof(HashedWheelTimer), this.tickDuration, this.wheel.Length, this.MAX_PENDING_TIMER_TASKS);
         }
-
     }
 }

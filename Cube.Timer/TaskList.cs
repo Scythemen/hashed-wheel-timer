@@ -36,15 +36,15 @@ namespace Cube.Timer
             {
                 expiring++;
             }
-
         }
 
-        public (int total, TaskEntry[] expiredTasks) RemoveExpiredTasks()
+        public (int total, TaskEntry[] expiredTasks, int totalNotices) RemoveExpiredTasks()
         {
             var rmTotal = expiring;
             var rmArray = ArrayPool<TaskEntry>.Shared.Rent(expiring);
 
-            expiring = 0;// reset
+            expiring = 0; // reset
+            var rmNotices = 0;
 
             var current = head;
             var prev = head;
@@ -63,7 +63,12 @@ namespace Cube.Timer
                     {
                         prev.Next = current.Next;
                     }
+
                     rmArray[idx++] = current;
+                    if (current.TimerTaskHandle.Notice != null)
+                    {
+                        rmNotices++;
+                    }
                 }
                 else
                 {
@@ -80,7 +85,7 @@ namespace Cube.Timer
 
             total -= rmTotal;
 
-            return (rmTotal, rmArray);
+            return (rmTotal, rmArray, rmNotices);
         }
 
         public (int total, TimerTaskHandle[] handles) RemoveAllTasks()
@@ -108,6 +113,5 @@ namespace Cube.Timer
         {
             head = null;
         }
-
     }
 }

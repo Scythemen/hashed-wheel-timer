@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 
 namespace Cube.Timer
 {
-    internal static class Extend
+    internal static class Extensions
     {
         public static async Task TimeoutAfter(this Task task, TimeSpan timeout)
         {
