@@ -27,15 +27,19 @@ namespace Test.Cube.Timer
 
             var timer = new HashedWheelTimer(logger);
 
-            timer.AddTask(1357, () =>
-              {
-                  Debug.WriteLine($"{DateTime.Now.ToString("HH:mm:ss.fff")} : do work. thread-id={Thread.CurrentThread.ManagedThreadId} ");
-              });
+            timer.AddTask(1357,
+                () =>
+                {
+                    Debug.WriteLine(
+                        $"{DateTime.Now.ToString("HH:mm:ss.fff")} : do work. thread-id={Thread.CurrentThread.ManagedThreadId} ");
+                });
 
-            timer.AddTask(TimeSpan.FromMilliseconds(1234), (prm) =>
-            {
-                Debug.WriteLine($"{DateTime.Now.ToString("HH:mm:ss.fff")} : do work. parameter={prm}, thread-id={Thread.CurrentThread.ManagedThreadId} ");
-            }, 999);
+            timer.AddTask(TimeSpan.FromMilliseconds(1234),
+                (prm) =>
+                {
+                    Debug.WriteLine(
+                        $"{DateTime.Now.ToString("HH:mm:ss.fff")} : do work. parameter={prm}, thread-id={Thread.CurrentThread.ManagedThreadId} ");
+                }, 999);
 
             var t = Task.Run(async () =>
             {
@@ -49,7 +53,6 @@ namespace Test.Cube.Timer
             });
 
             t.Wait();
-
         }
 
         [Test]
@@ -63,40 +66,33 @@ namespace Test.Cube.Timer
             });
             var logger = loggerFactory.CreateLogger<HashedWheelTimer>();
 
-            var timer = new HashedWheelTimer(TimeSpan.FromSeconds(1),512,0, logger);
-            
-            timer.SetNoticeCallback((list) =>
+            var timer = new HashedWheelTimer(TimeSpan.FromSeconds(1), 512, 0, logger);
+
+            timer.SetNoticeCallback((notices) =>
+            {
+                foreach (var obj in notices)
                 {
-                    foreach (var obj in list)
-                    {
-                        if (obj==null)
-                        {
-                            break;
-                        }
-                         logger.LogDebug(" +++++ notice callback {}",obj);
-                    }
-                });
+                    logger.LogDebug(" +++++ notice callback {}", obj);
+                }
+            });
 
+            timer.AddNotice(1357, 1357);
+            timer.AddNotice(TimeSpan.FromMilliseconds(1234), "{\"id\":32,\"name\":\"Jeo\"}");
 
-                timer.AddNotice(1357, 1357);
+            var t = Task.Run(async () =>
+            {
+                await Task.Delay(1000);
 
-                timer.AddNotice(TimeSpan.FromMilliseconds(1234), 1234);
-
-                var t = Task.Run(async () =>
+                while (timer.IsRunning && timer.PendingTasks != 0)
                 {
+                    logger.LogDebug($">> PendingTasks : {timer.PendingTasks} ");
                     await Task.Delay(1000);
-
-                    while (timer.IsRunning && timer.PendingTasks != 0)
-                    {
-                        logger.LogDebug($">> PendingTasks : {timer.PendingTasks} ");
-                        await Task.Delay(1000);
-                    }
-                });
+                }
+            });
 
             t.Wait();
-
         }
-        
+
         [Test]
         public void AddNotice2()
         {
@@ -114,29 +110,29 @@ namespace Test.Cube.Timer
             {
                 source[i] = random.Next(DateTime.Now.Millisecond);
             }
-            
-              var result = new List<int>( );
-                    
-            var timer = new HashedWheelTimer(TimeSpan.FromSeconds(1),512,0, logger);
-            
+
+            var result = new List<int>();
+
+            var timer = new HashedWheelTimer(TimeSpan.FromSeconds(1), 512, 0, logger);
+
             timer.SetNoticeCallback((notices) =>
             {
                 foreach (var obj in notices)
                 {
-                    if (obj==null)
-                    {
-                        break;
-                    }
+                    // if (obj==null)
+                    // {
+                    //     break;
+                    // }
                     result.Add(Convert.ToInt32(obj));
-                    logger.LogDebug(" +++++ notice callback {}",obj);
+                    logger.LogDebug(" +++++ notice callback {}", obj);
                 }
             });
 
             for (int i = 0; i < source.Length; i++)
             {
-                timer.AddNotice(random.Next(1000, 10 * 1000),source[i]);
+                timer.AddNotice(random.Next(1000, 10 * 1000), source[i]);
             }
-          
+
 
             var t = Task.Run(async () =>
             {
@@ -151,11 +147,9 @@ namespace Test.Cube.Timer
 
             t.Wait();
 
-            Assert.IsTrue( source.Length==result.Count);
-
-            
+            Assert.IsTrue(source.Length == result.Count);
         }
-        
+
 
         [Test]
         public void TracingLogger()
@@ -171,10 +165,8 @@ namespace Test.Cube.Timer
             var timer = new HashedWheelTimer(logger);
 
             // add a new task with lambda expression
-            var handle = timer.AddTask(1357, () =>
-           {
-               Debug.WriteLine($"{DateTime.Now.ToString("HH:mm:ss.fff")} : do work. ");
-           });
+            var handle = timer.AddTask(1357,
+                () => { Debug.WriteLine($"{DateTime.Now.ToString("HH:mm:ss.fff")} : do work. "); });
             // if cancel the task
             handle.Cancel();
 
@@ -183,10 +175,9 @@ namespace Test.Cube.Timer
             Assert.IsTrue(timer.PendingTasks == 0);
 
             // add a new task with lambda expression, passing parameter
-            timer.AddTask(TimeSpan.FromMilliseconds(1234), (prm) =>
-             {
-                 Debug.WriteLine($"{DateTime.Now.ToString("HH:mm:ss.fff")} : do work. parameter={prm}");
-             }, 999);
+            timer.AddTask(TimeSpan.FromMilliseconds(1234),
+                (prm) => { Debug.WriteLine($"{DateTime.Now.ToString("HH:mm:ss.fff")} : do work. parameter={prm}"); },
+                999);
 
             // add a new task which implement ITimerTask
             var handle2 = timer.AddTask(4357, new MyTimerTask());
@@ -205,13 +196,13 @@ namespace Test.Cube.Timer
 
             Assert.IsFalse(timer.IsRunning);
             Assert.IsTrue(timer.PendingTasks == 0);
-
         }
 
         [Test]
         public void TestCtor()
         {
-            var timer = new HashedWheelTimer(tickDuration: TimeSpan.FromMilliseconds(100), ticksPerWheel: 512, maxPendingTimerTasks: 0);
+            var timer = new HashedWheelTimer(tickDuration: TimeSpan.FromMilliseconds(100), ticksPerWheel: 512,
+                maxPendingTimerTasks: 0);
 
             var timer2 = new HashedWheelTimer();
 
@@ -253,13 +244,16 @@ namespace Test.Cube.Timer
             int workerThreads, completionPortThreads;
 
             ThreadPool.GetMaxThreads(out workerThreads, out completionPortThreads);
-            Debug.WriteLine("GetMaxThreads£º worker threads={0}, IO threads={1} ", workerThreads, completionPortThreads);
+            Debug.WriteLine("GetMaxThreads£º worker threads={0}, IO threads={1} ", workerThreads,
+                completionPortThreads);
 
             ThreadPool.GetMinThreads(out workerThreads, out completionPortThreads);
-            Debug.WriteLine("GetMinThreads£º worker threads={0}, IO threads={1} ", workerThreads, completionPortThreads);
+            Debug.WriteLine("GetMinThreads£º worker threads={0}, IO threads={1} ", workerThreads,
+                completionPortThreads);
 
             ThreadPool.GetAvailableThreads(out workerThreads, out completionPortThreads);
-            Debug.WriteLine("GetAvailableThreads£º worker threads={0}, IO threads={1} ", workerThreads, completionPortThreads);
+            Debug.WriteLine("GetAvailableThreads£º worker threads={0}, IO threads={1} ", workerThreads,
+                completionPortThreads);
 
             //// -------
             //ThreadPool.SetMaxThreads(80, 512);
@@ -332,14 +326,11 @@ namespace Test.Cube.Timer
                 }
 
                 await timer.Stop(true);
-
             });
 
             t.Wait();
 
             Assert.IsTrue(timer.PendingTasks == 0 && counter == perThread * threads);
-
-
         }
 
         [Test]
@@ -358,28 +349,20 @@ namespace Test.Cube.Timer
             timer.AddTask(1000, () =>
             {
                 Debug.WriteLine($" before do work. ");
-                // devide by zero
+                // divide by zero
                 int a = 9;
                 int b = 8;
                 int c = a / (b - 8);
                 Debug.WriteLine($"  {a} ");
             });
 
-            timer.AddTask(3000, () =>
-                       {
-                           Debug.WriteLine($" do work. ");
-                       });
+            timer.AddTask(3000, () => { Debug.WriteLine($" do work. "); });
 
 
             while (timer.PendingTasks > 0)
             {
                 Thread.Sleep(600);
             }
-
-
         }
-
- 
-
     }
 }

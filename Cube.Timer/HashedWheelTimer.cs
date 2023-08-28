@@ -146,7 +146,7 @@ namespace Cube.Timer
         /// </summary>
         public delegate void NoticeCallback(IList<object> notices);
 
-        private NoticeCallback noticeCallback;
+        private NoticeCallback noticeCallback = null;
 
         /// <summary>
         /// Set the notice callback.
@@ -350,7 +350,7 @@ namespace Cube.Timer
         /// <summary>
         /// stop the timer
         /// </summary>
-        /// <param name="gatherUnprocessedTasks">gather upprocessed tasks</param>
+        /// <param name="gatherUnprocessedTasks">gather unprocessed tasks</param>
         /// <returns>return empty list if gatherUnprocessedTasks = false, otherwise return all the unprocessed tasks. </returns>
         public async Task<IList<TimerTaskHandle>> Stop(bool gatherUnprocessedTasks = false)
         {

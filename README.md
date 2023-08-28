@@ -15,28 +15,31 @@ A .NET implementation of Timer, which optimized for approximated I/O timeout sch
 
 Download the source code, or NuGet package
 
-```shell
 https://www.nuget.org/packages/Cube.Timer
-```
+
 
 # Usage
 
 *More details in the test-project*
 
 ```csharp 
+
 // constructor
 public HashedWheelTimer(
     TimeSpan tickDuration,
     int ticksPerWheel = 512,
     long maxPendingTimerTasks = 0,
     ILogger<HashedWheelTimer> logger = null)
+    
 ```
 
 Create an instance of timer, then add new `timer-task`.
 
+## AddTask
+
 ```csharp
 
-var timer = new HashedWheelTimer(logger);
+var timer = new HashedWheelTimer(); // use the default value
 
 // add a new task with lambda expression, delay 1357ms.
 var handle = timer.AddTask(1357, () =>
@@ -53,20 +56,26 @@ handle.Cancel();
 // reuse the timerTask
 timer.AddTask(2000, handle.TimerTask);
 
+// ------------------
 // add a new task with lambda expression, passing parameter=999
 timer.AddTask(TimeSpan.FromMilliseconds(1234), (prm) =>
 {
     Debug.WriteLine($"{DateTime.Now.ToString("HH:mm:ss.fff")} : do work. parameter={prm}");
 }, 999);
 
-
+// ------------------
 // add a new task which instant class implements ITimerTask
 timer.AddTask(4357, new MyTimerTask());
-
  
+// ------------------
 // stop the timer, and get the unprocessed tasks.
-IEnumerable<TimerTaskHandle> unprocessedTasks = await timer.Stop();
+IEnumerable<TimerTaskHandle> unprocessedTasks = await timer.Stop(gatherUnprocessedTasks:true);
 
+// ------------------
+// check the padding tasks
+if(timer.IsRunning && timer.PendingTasks != 0) { }
+
+        
 ```
 
 Implement the ITimerTask
@@ -81,7 +90,6 @@ public interface ITimerTask
     Task RunAsync();
 }
 
-
 public class MyTimerTask : ITimerTask
 {
     public Task RunAsync()
@@ -92,5 +100,23 @@ public class MyTimerTask : ITimerTask
 }
 
 ```
+## AddNotice
+For batch operation. A `notice` is an `object`, can represent anything.
 
+```csharp
+// firstly set the callback delegate.
+timer.SetNoticeCallback((notices) =>
+{
+    // batch operation
+    foreach (var obj in notices)
+    {
+        // ... 
+    }
+});
 
+// then add the notices.
+timer.AddNotice(1357, 1357);
+timer.AddNotice(TimeSpan.FromMilliseconds(1234), "{\"id\":32,\"name\":\"Jeo\"}");
+// ... add more notices
+
+```
