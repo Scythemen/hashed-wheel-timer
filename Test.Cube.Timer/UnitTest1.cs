@@ -4,42 +4,54 @@ using Microsoft.Extensions.Logging.Abstractions;
 using System.Buffers;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using System.Security.AccessControl;
+using Microsoft.Extensions.Logging.Console;
+using NLog.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 
 namespace Test.Cube.Timer
 {
     public class Tests
     {
+        private ILogger tlog;
+        private ILoggerFactory loggerFactory;
+        private ILogger<HashedWheelTimer> logger;
+
         [SetUp]
         public void Setup()
         {
+            var consoleTarget = new NLog.Targets.ConsoleTarget("consoleTarget");
+            consoleTarget.Layout =
+                @"${date:format=HH\:mm\:ss.ffff}|${uppercase:${level}}|${logger}|threadId ${threadid}|${message} ${exception:format=tostring}";
+
+            var fileTarget = new NLog.Targets.FileTarget("fileTarget");
+            fileTarget.Layout = consoleTarget.Layout;
+            fileTarget.FileName = "./test.cube.timer.log";
+
+            var config = new NLog.Config.LoggingConfiguration();
+            config.AddRule(NLog.LogLevel.Trace, NLog.LogLevel.Fatal, consoleTarget, "*");
+            config.AddRule(NLog.LogLevel.Trace, NLog.LogLevel.Fatal, fileTarget, "*");
+
+            loggerFactory = LoggerFactory.Create(builder =>
+            {
+                builder.ClearProviders();
+                builder.AddNLog(config);
+            });
+            tlog = loggerFactory.CreateLogger<Tests>();
+            logger = loggerFactory.CreateLogger<HashedWheelTimer>();
         }
+
 
         [Test]
         public void AddNewTask()
         {
-            var loggerFactory = LoggerFactory.Create((builder) =>
-            {
-                builder.SetMinimumLevel(LogLevel.Trace);
-                builder.AddConsole();
-                builder.AddDebug();
-            });
-            var logger = loggerFactory.CreateLogger<HashedWheelTimer>();
-
             var timer = new HashedWheelTimer(logger);
 
             timer.AddTask(1357,
-                () =>
-                {
-                    Debug.WriteLine(
-                        $"{DateTime.Now.ToString("HH:mm:ss.fff")} : do work. thread-id={Thread.CurrentThread.ManagedThreadId} ");
-                });
+                () => { logger.LogTrace($"do work. thread-id={Thread.CurrentThread.ManagedThreadId} "); });
 
             timer.AddTask(TimeSpan.FromMilliseconds(1234),
-                (prm) =>
-                {
-                    Debug.WriteLine(
-                        $"{DateTime.Now.ToString("HH:mm:ss.fff")} : do work. parameter={prm}, thread-id={Thread.CurrentThread.ManagedThreadId} ");
-                }, 999);
+                (prm) => { logger.LogTrace($"do work. parameter={prm}, thread-id={Thread.CurrentThread.ManagedThreadId} "); }, 999);
 
             var t = Task.Run(async () =>
             {
@@ -47,7 +59,7 @@ namespace Test.Cube.Timer
 
                 while (timer.IsRunning && timer.PendingTasks != 0)
                 {
-                    Debug.WriteLine($">> PendingTasks : {timer.PendingTasks} ");
+                    tlog.LogTrace($">> PendingTasks : {timer.PendingTasks} ");
                     await Task.Delay(1000);
                 }
             });
@@ -58,14 +70,6 @@ namespace Test.Cube.Timer
         [Test]
         public void AddNotice()
         {
-            var loggerFactory = LoggerFactory.Create((builder) =>
-            {
-                builder.SetMinimumLevel(LogLevel.Trace);
-                builder.AddConsole();
-                builder.AddDebug();
-            });
-            var logger = loggerFactory.CreateLogger<HashedWheelTimer>();
-
             var timer = new HashedWheelTimer(TimeSpan.FromSeconds(1), 512, 0, logger);
 
             timer.SetNoticeCallback((notices) =>
@@ -81,29 +85,22 @@ namespace Test.Cube.Timer
 
             var t = Task.Run(async () =>
             {
-                await Task.Delay(1000);
-
                 while (timer.IsRunning && timer.PendingTasks != 0)
                 {
                     logger.LogDebug($">> PendingTasks : {timer.PendingTasks} ");
                     await Task.Delay(1000);
                 }
+
+                await Task.Delay(3000);
             });
 
             t.Wait();
         }
 
+
         [Test]
         public void AddNotice2()
         {
-            var loggerFactory = LoggerFactory.Create((builder) =>
-            {
-                builder.SetMinimumLevel(LogLevel.Trace);
-                builder.AddConsole();
-                builder.AddDebug();
-            });
-            var logger = loggerFactory.CreateLogger<HashedWheelTimer>();
-
             Random random = new Random(DateTime.Now.Millisecond);
             var source = new int[1024];
             for (int i = 0; i < source.Length; i++)
@@ -154,14 +151,6 @@ namespace Test.Cube.Timer
         [Test]
         public void TracingLogger()
         {
-            var loggerFactory = LoggerFactory.Create((builder) =>
-            {
-                builder.SetMinimumLevel(LogLevel.Trace);
-                builder.AddConsole();
-                builder.AddDebug();
-            });
-            var logger = loggerFactory.CreateLogger<HashedWheelTimer>();
-
             var timer = new HashedWheelTimer(logger);
 
             // add a new task with lambda expression
@@ -201,20 +190,11 @@ namespace Test.Cube.Timer
         [Test]
         public void TestCtor()
         {
-            var timer = new HashedWheelTimer(tickDuration: TimeSpan.FromMilliseconds(100), ticksPerWheel: 512,
-                maxPendingTimerTasks: 0);
+            var timer = new HashedWheelTimer(tickDuration: TimeSpan.FromMilliseconds(100), ticksPerWheel: 512, maxPendingTimerTasks: 0);
 
             var timer2 = new HashedWheelTimer();
 
             var timer3 = new HashedWheelTimer(tickDuration: TimeSpan.FromMilliseconds(100));
-
-            var loggerFactory = LoggerFactory.Create((builder) =>
-            {
-                builder.SetMinimumLevel(LogLevel.Trace);
-                builder.AddConsole();
-                builder.AddDebug();
-            });
-            var logger = loggerFactory.CreateLogger<HashedWheelTimer>();
 
             var timer4 = new HashedWheelTimer(logger);
 
@@ -244,15 +224,15 @@ namespace Test.Cube.Timer
             int workerThreads, completionPortThreads;
 
             ThreadPool.GetMaxThreads(out workerThreads, out completionPortThreads);
-            Debug.WriteLine("GetMaxThreads£º worker threads={0}, IO threads={1} ", workerThreads,
+            Debug.WriteLine("GetMaxThreads worker threads={0}, IO threads={1} ", workerThreads,
                 completionPortThreads);
 
             ThreadPool.GetMinThreads(out workerThreads, out completionPortThreads);
-            Debug.WriteLine("GetMinThreads£º worker threads={0}, IO threads={1} ", workerThreads,
+            Debug.WriteLine("GetMinThreads worker threads={0}, IO threads={1} ", workerThreads,
                 completionPortThreads);
 
             ThreadPool.GetAvailableThreads(out workerThreads, out completionPortThreads);
-            Debug.WriteLine("GetAvailableThreads£º worker threads={0}, IO threads={1} ", workerThreads,
+            Debug.WriteLine("GetAvailableThreads worker threads={0}, IO threads={1} ", workerThreads,
                 completionPortThreads);
 
             //// -------
@@ -260,16 +240,6 @@ namespace Test.Cube.Timer
 
             //ThreadPool.GetAvailableThreads(out workerThreads, out completionPortThreads);
             //     Debug.WriteLine("GetAvailableThreads£º worker threads={0}, IO threads={1} ", workerThreads, completionPortThreads);
-
-
-            var loggerFactory = LoggerFactory.Create((builder) =>
-            {
-                builder.SetMinimumLevel(LogLevel.Debug);
-                builder.AddDebug();
-                //    builder.AddConsole();
-            });
-
-            var logger = loggerFactory.CreateLogger<HashedWheelTimer>();
 
             Debug.WriteLine($"unit test, thread-id={Thread.CurrentThread.ManagedThreadId}");
 
@@ -334,16 +304,57 @@ namespace Test.Cube.Timer
         }
 
         [Test]
+        public void TestFreeArrayBeforeLongTermTaskComplete()
+        {
+            var timer = new HashedWheelTimer(TimeSpan.FromMilliseconds(500), 512, 0, logger);
+
+            timer.AddTask(2222, () =>
+            {
+                Task.Run(async () =>
+                {
+                    for (int i = 0; i < 8; i++)
+                    {
+                        logger.LogTrace("=== task.1. do work. {}, thread-id={} ", i, Thread.CurrentThread.ManagedThreadId);
+                        await Task.Delay(1000);
+                    }
+                });
+            });
+
+
+            timer.AddTask(3333, () =>
+            {
+                Task.Run(async () =>
+                {
+                    for (int i = 0; i < 8; i++)
+                    {
+                        logger.LogTrace("+++ task.2. do work. {}, thread-id={} ", i, Thread.CurrentThread.ManagedThreadId);
+                        Task.Delay(1000).Wait();
+                    }
+                });
+            });
+
+
+            timer.AddTask(1111, new HeavyTimerTask());
+
+
+            var t = Task.Run(async () =>
+            {
+                await Task.Delay(1000);
+
+                for (int i = 0; i < 15; i++)
+                {
+                    logger.LogTrace($">> PendingTasks : {timer.PendingTasks} ");
+                    await Task.Delay(1000);
+                }
+            });
+
+            t.Wait();
+        }
+
+
+        [Test]
         public void TestExecuteException()
         {
-            var loggerFactory = LoggerFactory.Create((builder) =>
-            {
-                builder.SetMinimumLevel(LogLevel.Trace);
-                builder.AddConsole();
-                builder.AddDebug();
-            });
-            var logger = loggerFactory.CreateLogger<HashedWheelTimer>();
-
             var timer = new HashedWheelTimer(logger);
 
             timer.AddTask(1000, () =>

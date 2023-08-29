@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using System;
 using System.Buffers;
+using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
@@ -120,7 +121,7 @@ namespace Cube.Timer
                 this.logger = logger;
             }
 
-            this.MAX_PENDING_TIMER_TASKS = maxPendingTimerTasks;
+            MAX_PENDING_TIMER_TASKS = maxPendingTimerTasks;
 
             wheel = CreateWheel(ticksPerWheel);
             mask = wheel.Length - 1;
@@ -136,26 +137,22 @@ namespace Cube.Timer
 
             this.logger.LogDebug("Initialized, {0}", this);
 
-            workerThreadTask = Task.Factory.StartNew(SpinTheWheel, cancellationTokenSource.Token,
-                TaskCreationOptions.LongRunning, TaskScheduler.Default);
+            workerThreadTask = Task.Factory.StartNew(SpinTheWheel, cancellationTokenSource.Token, TaskCreationOptions.LongRunning,
+                TaskScheduler.Default);
         }
 
 
-        /// <summary>
-        /// The delegate to handle the notices.
-        /// </summary>
-        public delegate void NoticeCallback(IList<object> notices);
-
-        private NoticeCallback noticeCallback = null;
+        private Action<IList<object>> noticeCallback = null;
 
         /// <summary>
-        /// Set the notice callback.
+        /// Set the notice callback. If it takes a long time to complete the task, consider to start a new thread.
         /// </summary>
         /// <param name="callback"></param>
-        public void SetNoticeCallback(NoticeCallback callback)
+        public void SetNoticeCallback(Action<IList<object>> callback)
         {
             noticeCallback = callback;
         }
+
 
         /// <summary>
         /// Add a notice task for one-time execution.
@@ -354,7 +351,7 @@ namespace Cube.Timer
         /// <returns>return empty list if gatherUnprocessedTasks = false, otherwise return all the unprocessed tasks. </returns>
         public async Task<IList<TimerTaskHandle>> Stop(bool gatherUnprocessedTasks = false)
         {
-            logger.LogTrace($"Stoping {nameof(HashedWheelTimer)} ... gatherUnprocessedTasks={gatherUnprocessedTasks}");
+            logger.LogTrace("Stopping {}, gatherUnprocessedTasks={} ...", nameof(HashedWheelTimer), gatherUnprocessedTasks);
 
             lock (newTaskQueue)
             {
@@ -376,7 +373,7 @@ namespace Cube.Timer
                 {
                     if (workerThreadTask != null && !workerThreadTask.IsCompleted)
                     {
-                        logger.LogTrace("Waiting for the worker thread...");
+                        logger.LogTrace("Waiting for gathering unprocessed tasks...");
 
 #if (NET6_0 || NET7_0)
                         await workerThreadTask.WaitAsync(TimeSpan.FromSeconds(5));
@@ -387,11 +384,11 @@ namespace Cube.Timer
                 }
                 catch (Exception ex)
                 {
-                    logger.LogDebug(ex, "stop timer");
+                    logger.LogDebug(ex, "Waiting for gathering unprocessed tasks");
                 }
             }
 
-            logger.LogDebug($"Stoping {nameof(HashedWheelTimer)} ... done");
+            logger.LogDebug("Stopping {} ... done", nameof(HashedWheelTimer));
 
             return unprocessedTasks;
         }
@@ -401,23 +398,18 @@ namespace Cube.Timer
 
         private void SpinTheWheel()
         {
-            this.logger.LogTrace("Start spinning the wheel...   ManagedThreadId={0}",
-                Thread.CurrentThread.ManagedThreadId);
+            logger.LogTrace("Spinning the wheel...");
 
-            Exception unhandleException = null;
+            Exception unhandledException = null;
             CancellationToken token = cancellationTokenSource.Token;
             try
             {
-                IList<object> expiredNotices = new List<object>();
-
                 while (!token.IsCancellationRequested)
                 {
-                    if (this.logger.IsEnabled(LogLevel.Trace))
+                    if (logger.IsEnabled(LogLevel.Trace))
                     {
-                        this.logger.LogTrace(
-                            "{0} >>> ticking --------- {1} -- ManagedThreadId={2} -- IsThreadPoolThread={3}  ",
-                            tick, DateTime.Now.ToString("HH:mm:ss.fff"), Thread.CurrentThread.ManagedThreadId,
-                            Thread.CurrentThread.IsThreadPoolThread);
+                        logger.LogTrace("---- ticking = {}, managedThreadId = {}, isThreadPoolThread = {}",
+                            tick, Thread.CurrentThread.ManagedThreadId, Thread.CurrentThread.IsThreadPoolThread);
                     }
 
                     TransferNewTaskToWheel(token);
@@ -426,10 +418,18 @@ namespace Cube.Timer
                     var idx = (int)(tick & mask);
                     (var expiredTotal, var expiredTasks, var totalNotices) = wheel[idx].RemoveExpiredTasks();
 
-                    this.logger.LogTrace("{0} >>> remove the expired tasks, count = {1}", tick, expiredTasks.Length);
+                    if (expiredTotal > 0)
+                    {
+                        logger.LogTrace("---- ticking = {}, remove the expired tasks, count = {}", tick, expiredTotal);
+                    }
 
                     // process expired tasks
-                    expiredNotices.Clear();
+                    IList<object> expiredNotices = null;
+                    if (totalNotices > 0)
+                    {
+                        expiredNotices = new List<object>(totalNotices);
+                    }
+
                     Interlocked.Add(ref pendingTasks, -expiredTotal);
                     for (int i = 0; i < expiredTotal; i++)
                     {
@@ -453,20 +453,26 @@ namespace Cube.Timer
                     }
 
                     // handle the notices
-                    if (expiredNotices.Count > 0)
+                    if (totalNotices > 0)
                     {
                         noticeCallback?.Invoke(expiredNotices);
                     }
 
                     // free the array, very important.
                     ArrayPool<TaskEntry>.Shared.Return(expiredTasks);
+                    if (expiredTotal > 0)
+                    {
+                        logger.LogTrace("---- ticking = {}, Release {} to arrayPool, count={}", tick, nameof(TaskEntry), expiredTotal);
+                    }
 
                     // wait to next tick
                     var deadline = baseTime + tickDuration + tick * tickDuration - 1;
                     var sleep = (int)((deadline - DateTime.UtcNow.Ticks) / 10000); // milliseconds
+
+                    logger.LogTrace("---- ticking = {}, Sleep and wait to next tick, {1}ms. ", tick, sleep);
+
                     if (sleep > 0)
                     {
-                        this.logger.LogTrace("{0} >>> Sleep and wait to next tick, {1}ms. ", tick, sleep);
                         Thread.Sleep(sleep);
                     }
 
@@ -485,7 +491,7 @@ namespace Cube.Timer
             }
             catch (Exception ex)
             {
-                unhandleException = ex;
+                unhandledException = ex;
                 cancellationTokenSource.Cancel();
 
                 logger.LogError(ex, "Check the execution of the timer task.");
@@ -500,9 +506,9 @@ namespace Cube.Timer
 
             logger.LogDebug("Worker thread exit, the wheel stops spinning.");
 
-            if (unhandleException != null)
+            if (unhandledException != null)
             {
-                throw unhandleException;
+                throw unhandledException;
             }
         }
 
@@ -546,7 +552,7 @@ namespace Cube.Timer
 
                 if (entry.TimerTaskHandle.Cancelled)
                 {
-                    logger.LogTrace("{0} >>> task was cancelled: {0}", tick, entry);
+                    logger.LogTrace("---- ticking = {}, transfer new tasks was cancelled, transferred count={}", tick, count);
                     Interlocked.Decrement(ref pendingTasks);
                     continue;
                 }
@@ -556,7 +562,10 @@ namespace Cube.Timer
                 count++;
             }
 
-            logger.LogTrace("{0} >>> Transfer new tasks, count = {1}", tick, count);
+            if (count > 0)
+            {
+                logger.LogTrace("---- ticking = {}, transfer new tasks, count = {}", tick, count);
+            }
 
             return count;
         }
@@ -598,7 +607,7 @@ namespace Cube.Timer
         public override string ToString()
         {
             return string.Format("[{0}: tickDuration={1}, ticksPerWheel={2}, maxPendingTimerTasks={3}]",
-                nameof(HashedWheelTimer), this.tickDuration, this.wheel.Length, this.MAX_PENDING_TIMER_TASKS);
+                nameof(HashedWheelTimer), tickDuration, wheel.Length, MAX_PENDING_TIMER_TASKS);
         }
     }
 }

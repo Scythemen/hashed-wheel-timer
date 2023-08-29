@@ -15,13 +15,11 @@
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 		<RepositoryUrl>https://github.com/Scythemen/hashed-wheel-timer</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
-		<PackageReleaseNotes>1. Optimized &amp; clean the codes.
-2. Replace doubly-linked-list with singly-linked-list to reduce memory used.
-3. Use ArrayPool to Prevent GC.
-4. Testing passed of ~4,000,000 timer tasks, I think it's good enough for general scenarios.</PackageReleaseNotes>
+		<PackageReleaseNotes>Optimized &amp; clean the codes &amp; adjust the logger.
+</PackageReleaseNotes>
 		<PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
 		<PackageRequireLicenseAcceptance>True</PackageRequireLicenseAcceptance>
-		<Version>1.0.3</Version>
+		<Version>1.0.5</Version>
 	</PropertyGroup>
 
 	<PropertyGroup Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('$(TargetFramework)', '^net\d'))">
